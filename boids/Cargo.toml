@@ -5,3 +5,4 @@ edition = "2024"
 
 [dependencies]
 macroquad = "0.4.16"
+real_rand = {package = "rand", version ="0.10.3"}
