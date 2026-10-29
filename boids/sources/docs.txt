@@ -1,0 +1,6 @@
+Macoquad:
+- https://macroquad.rs/docs/
+
+Rust:
+- https://doc.rust-lang.org/book/
+- https://stackoverflow.com/	#Für generelle, schnelle hilfe bei problemen mit Rust selbst.
