@@ -1,7 +1,7 @@
 use crate::config::boid_config::BoidConfig;
 use crate::config::boundary::Boundary;
 use crate::config::parameters::Parameters;
-use log::{info, warn};
+use crate::debug_tools::warning_handler::WarningHandler;
 
 use macroquad::prelude::*;
 
@@ -16,6 +16,7 @@ pub struct Boid {
     //current is only read by other boids and next is written to.
     //this is a solution to the borrow checker and makes later async much easier, since all boids take a step at the same time and only change velocity when everything is calculated.
     boundary: Boundary,
+    pub inside_boundary: bool, //DEBUG bool to check if boid is inside boundary
 }
 
 impl Boid {
@@ -33,24 +34,11 @@ impl Boid {
             next_velocity: vec3(0.0, 0.0, 0.0),
             boid_conf: boid_conf.clone(),
             boundary: boundary.clone(),
+            inside_boundary: true, //assuming starting position is inside boundary
         }
     }
 
-    fn calc_desired_cohesion(&self, boids: &Vec<Boid>) -> Vec3 {
-        //calculating center of all boids
-        //TODO add viewing range and possibly viewing field
-        let mut sum = vec3(0.0, 0.0, 0.0);
-        for b in boids {
-            if b.id != self.id {
-                sum += b.position;
-            }
-        }
-        let center = sum / (boids.len() as f32 - 1.0);
-        let desired = (center - self.position).normalize_or_zero() * self.boid_conf.max_velocity;
-
-        desired
-    }
-
+    //converting desired velocity to steering force, which is the difference between desired and current velocity, capped at max_force.
     fn calc_steering_force(&self, desired: Vec3) -> Vec3 {
         let mut steering_force = desired - self.current_velocity;
         steering_force =
@@ -59,32 +47,67 @@ impl Boid {
         steering_force
     }
 
-    fn calc_desired_alignment(&self, boids: &Vec<Boid>) -> Vec3 {
-        //calculating average normalized direction of every boid
-        //TODO add viewing range and possibly viewing field
-        let mut sum: Vec3 = vec3(0.0, 0.0, 0.0);
+    //functions for calculating desired velocity for each of the three rules of boids, cohesion, alignment and separation.
+    fn calc_desired_cohesion(&self, boids: &Vec<Boid>) -> Vec3 {
+        //calculating center of all boids
+        let mut count = 0;
+        let mut sum = vec3(0.0, 0.0, 0.0);
         for b in boids {
-            if b.id != self.id {
-                sum += b.current_velocity.normalize_or_zero();
+            if (b.id != self.id)
+                && (self.position.distance(b.position) < self.boid_conf.view_radius)
+            {
+                sum += b.position;
+                count += 1;
             }
         }
-        let avg_velocity = sum / (boids.len() as f32 - 1.0);
+        if count == 0 {
+            return vec3(0., 0., 0.);
+        }
+        let center = sum / (count as f32);
+        let desired = (center - self.position).normalize_or_zero() * self.boid_conf.max_velocity;
+
+        desired
+    }
+
+    fn calc_desired_alignment(&self, boids: &Vec<Boid>) -> Vec3 {
+        //calculating average normalized direction of every boid
+        let mut count = 0;
+        let mut sum: Vec3 = vec3(0.0, 0.0, 0.0);
+        for b in boids {
+            if (b.id != self.id)
+                && (self.position.distance(b.position) < self.boid_conf.view_radius)
+            {
+                sum += b.current_velocity.normalize_or_zero();
+                count += 1;
+            }
+        }
+        if count == 0 {
+            return vec3(0., 0., 0.);
+        }
+        let avg_velocity = sum / (count as f32);
         let desired = avg_velocity.normalize_or_zero() * self.boid_conf.max_velocity;
         desired
     }
 
     fn calc_desired_separation(&self, boids: &Vec<Boid>) -> Vec3 {
         //calculating the avg of vectors pointiung away from other boids scaling with distance
-        //TODO add viewing range and possibly viewing field as well as a factor
+        let mut count = 0;
         let mut sum: Vec3 = vec3(0.0, 0.0, 0.0);
         for b in boids {
-            if b.id != self.id {
+            if (b.id != self.id)
+                && (self.position.distance(b.position) < self.boid_conf.view_radius)
+            {
                 let diff = self.position - b.position;
                 let distance = self.position.distance(b.position);
-                sum += diff.normalize_or_zero() / distance.powi(2);
+                let distance = distance.max(1e-3);
+                sum += diff.normalize_or_zero() / distance.powi(2); //force scales with distance: small distance -> large force, big distance -> almost no force.
+                count += 1;
             }
         }
-        let desired = sum / (boids.len() as f32 - 1.0) * self.boid_conf.max_velocity;
+        if count == 0 {
+            return vec3(0., 0., 0.);
+        }
+        let desired = (sum / (count as f32)).normalize_or_zero() * self.boid_conf.max_velocity;
         desired
     }
 
@@ -107,35 +130,20 @@ impl Boid {
                 + (param.separation_weight * f_separation)
                 + (param.boundary_weight * f_boundary);
 
-            let acceleation = f_comb / self.boid_conf.mass;
+            let acceleration = f_comb / self.boid_conf.mass;
 
-            let v_new = self.current_velocity + acceleation;
+            let v_new = self.current_velocity + acceleration * param.time_step;
 
             v_new.clamp_length(-self.boid_conf.max_velocity, self.boid_conf.max_velocity)
         };
     }
 
-    pub fn update(&mut self, time_step: f32) {
+    pub fn update(&mut self, param: Parameters, handler: &WarningHandler) {
         self.current_velocity = self.next_velocity.clone();
-        self.position = self.position + (self.current_velocity * time_step);
+        self.position = self.position + (self.current_velocity * param.time_step);
 
-        info!("boid {} is at position: {}", self.id, self.position);
-        match &self.boundary {
-            Boundary::Cube(c) => {
-                if c.is_inside(self.position) {
-                    info!("boid {} is in boundary", self.id);
-                } else {
-                    warn!("boid {} is not in boundary", self.id)
-                }
-            }
-            Boundary::Sphere(s) => {
-                if s.is_inside(self.position) {
-                    info!("boid {} is in boundary", self.id);
-                } else {
-                    warn!("boid {} is not in boundary", self.id)
-                }
-            }
-        }
+        //DEBUG tmp
+        self.inside_boundary = handler.check(self);
 
         draw_cube(self.position, vec3(0.5, 0.5, 0.5), None, RED);
     }

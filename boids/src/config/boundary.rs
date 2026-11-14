@@ -25,14 +25,16 @@ impl Sphere {
     }
 
     pub fn get_steering_force(&self, safe_margin: f32, boid: &Boid) -> Vec3 {
-        let distance_to_center = (boid.position - self.center).length();
+        let to_boid = boid.position - self.center;
+        let distance_to_center = to_boid.length();
+        let edge_distance = self.radius - distance_to_center;
 
-        if distance_to_center > (self.radius - safe_margin) {
-            let desired = (self.center - boid.position).normalize_or_zero() * boid.boid_conf.max_velocity;
-            return desired - boid.current_velocity;
-        } else {
-            return vec3(0.0, 0.0, 0.0);
+        if edge_distance >= safe_margin {
+            return vec3(0., 0., 0.);
         }
+        let t = 1. - (edge_distance.max(0.0) / safe_margin).clamp(0.0, 1.0);
+        let desired = (-to_boid / distance_to_center.max(1e-6)) * t * boid.boid_conf.max_velocity;
+        (desired - boid.current_velocity).clamp_length_max(boid.boid_conf.max_force)
     }
 
     pub fn is_inside(&self, position: Vec3) -> bool {
@@ -43,7 +45,7 @@ impl Sphere {
         }
     }
 
-    pub fn draw(&self){
+    pub fn draw(&self) {
         draw_sphere_wires(self.center, self.radius, None, DARKBLUE);
     }
 }
@@ -58,47 +60,49 @@ impl Cube {
         let boid_pos = boid.position.to_array();
         let origin_pos = self.origin.to_array();
 
-        
-        let steering_arr = std::array::from_fn(|i| {
-            let distance = boid_pos[i] - origin_pos[i];
-            if distance < safe_margin || (self.size - distance) < safe_margin {
-                let mut s = 5. / distance.powi(2);
-                if distance > (self.size / 2.) {
-                    s *= -1.;
-                }
-                s
-            } else {
-                0.0
-            }
-        });
+        let mut desired = boid.current_velocity;
+        let mut active = false;
 
-        
-        let steering = Vec3::from(steering_arr); 
-        
-        let desired = steering.normalize_or_zero() * boid.boid_conf.max_velocity;
-        let mut steering_force = desired - boid.current_velocity;
-        
-        return steering_force.clamp_length(-boid.boid_conf.max_force, boid.boid_conf.max_force);
+        for i in 0..3 {
+            let low = boid_pos[i] - origin_pos[i];
+            let high = origin_pos[i] + self.size - boid_pos[i];
+
+            let (dist, sign) = if low <= high { (low, 1.) } else { (high, -1.) };
+
+            if dist < safe_margin {
+                active = true;
+                //scales with distance to wall, not just on/off on margin edge
+                let t = 1. - (dist / safe_margin).clamp(0.0, 1.0);
+                desired[i] = sign * t * boid.boid_conf.max_velocity;
+            }
+        }
+
+        if !active {
+            return vec3(0., 0., 0.);
+        }
+
+        (desired - boid.current_velocity).clamp_length_max(boid.boid_conf.max_force)
     }
 
     pub fn is_inside(&self, position: Vec3) -> bool {
-        let mut inside: bool = true;
         for (p, o) in position
             .to_array()
             .iter()
             .zip(self.origin.to_array().iter())
         {
             if p > &(o + self.size) || p < o {
-                inside = false;
+                return false;
             }
         }
 
-        return inside;
+        return true;
     }
 
-    pub fn draw(&self){
-        
-        draw_cube_wires(self.origin, vec3(self.size, self.size, self.size) - self.origin, DARKBLUE); 
-
+    pub fn draw(&self) {
+        draw_cube_wires(
+            self.origin + self.size / 2.,
+            vec3(self.size, self.size, self.size),
+            DARKBLUE,
+        );
     }
 }
