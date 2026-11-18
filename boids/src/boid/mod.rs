@@ -15,7 +15,6 @@ pub struct Boid {
     pub boid_conf: BoidConfig, //next calculated velocity and direction
     //current is only read by other boids and next is written to.
     //this is a solution to the borrow checker and makes later async much easier, since all boids take a step at the same time and only change velocity when everything is calculated.
-    boundary: Boundary,
     pub inside_boundary: bool, //DEBUG bool to check if boid is inside boundary
 }
 
@@ -24,8 +23,7 @@ impl Boid {
         starting_pos: Vec3,
         starting_vel: Vec3,
         boid_conf: &BoidConfig,
-        id: u16,
-        boundary: &Boundary,
+        id: u16
     ) -> Self {
         Boid {
             id,
@@ -33,7 +31,6 @@ impl Boid {
             current_velocity: starting_vel,
             next_velocity: vec3(0.0, 0.0, 0.0),
             boid_conf: boid_conf.clone(),
-            boundary: boundary.clone(),
             inside_boundary: true, //assuming starting position is inside boundary
         }
     }
@@ -111,7 +108,7 @@ impl Boid {
         desired
     }
 
-    pub fn calc_next_velocity(&mut self, boids: &Vec<Boid>, param: Parameters) {
+    pub fn calc_next_velocity<B: Boundary>(&mut self, boids: &Vec<Boid>, param: &Parameters<B>) {
         self.next_velocity = {
             let cohesion = self.calc_desired_cohesion(boids);
             let alignment = self.calc_desired_alignment(boids);
@@ -120,10 +117,7 @@ impl Boid {
             let f_cohesion = self.calc_steering_force(cohesion);
             let f_alignment = self.calc_steering_force(alignment);
             let f_separation = self.calc_steering_force(separation);
-            let f_boundary = match &self.boundary {
-                Boundary::Sphere(s) => s.get_steering_force(param.safe_margin, &self),
-                Boundary::Cube(c) => c.get_steering_force(param.safe_margin, &self),
-            };
+            let f_boundary = param.boundary.get_steering_force(param.safe_margin, self);
 
             let f_comb = (param.cohesion_weight * f_cohesion)
                 + (param.alignment_weight * f_alignment)
@@ -138,7 +132,7 @@ impl Boid {
         };
     }
 
-    pub fn update(&mut self, param: Parameters, handler: &WarningHandler) {
+    pub fn update<B: Boundary> (&mut self, param: &Parameters<B>, handler: &WarningHandler<B>) {
         self.current_velocity = self.next_velocity.clone();
         self.position = self.position + (self.current_velocity * param.time_step);
 

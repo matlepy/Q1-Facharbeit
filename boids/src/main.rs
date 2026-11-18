@@ -18,11 +18,10 @@ async fn main() {
     let mut pitch = 0.2f32;
 
     /*
-    let s = Sphere::new(vec3(0.0, 0.0, 0.0), boundary_size/2.0);
-    let boundary = Boundary::Sphere(s);
+    let boundary = Sphere::new(vec3(0.0, 0.0, 0.0), boundary_size/2.0);
     */
     //*
-    let c = Cube::new(
+    let boundary = Cube::new(
         vec3(
             -boundary_size / 2.0,
             -boundary_size / 2.0,
@@ -30,7 +29,6 @@ async fn main() {
         ),
         boundary_size,
     );
-    let boundary = Boundary::Cube(c);
     //*/
     let warn_handler = WarningHandler::new(boundary.clone(), false);
 
@@ -51,6 +49,7 @@ async fn main() {
         boundary_weight: 1.,
         safe_margin: 15.0,
         time_step: get_frame_time(),
+        boundary: boundary.clone(),
     };
 
     //creating N boid objects in Vector
@@ -72,16 +71,12 @@ async fn main() {
             starting_vel,
             &standard_conf,
             i,
-            &boundary,
         ))
     }
 
     loop {
         clear_background(BLACK);
-        match &boundary {
-            Boundary::Cube(c) => c.draw(),
-            Boundary::Sphere(s) => s.draw(),
-        }
+        boundary.draw();
 
         if is_mouse_button_down(MouseButton::Left) {
             yaw += mouse_delta_position().x * sensitivity;
@@ -107,11 +102,11 @@ async fn main() {
         //current solution to above
         let old_boids = boids.clone();
         for b in 0..boids.len() {
-            boids[b].calc_next_velocity(&old_boids, param);
+            boids[b].calc_next_velocity(&old_boids, &param);
         }
         //info!("updating boid positions");
         for b in 0..boids.len() {
-            boids[b].update(param, &warn_handler);
+            boids[b].update(&param, &warn_handler);
         }
 
         next_frame().await;

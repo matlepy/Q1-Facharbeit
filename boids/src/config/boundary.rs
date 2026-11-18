@@ -13,18 +13,21 @@ pub struct Sphere {
     radius: f32,
 }
 
-#[derive(Clone)]
-pub enum Boundary {
-    Cube(Cube),
-    Sphere(Sphere),
+pub trait Boundary {
+    fn get_steering_force(&self, safe_margin: f32, boid: &Boid) -> Vec3;
+    fn is_inside(&self, position: Vec3) -> bool;
+    fn draw(&self);
+    
 }
 
 impl Sphere {
     pub fn new(center: Vec3, radius: f32) -> Self {
         Sphere { center, radius }
     }
+}
+impl Boundary for Sphere {
 
-    pub fn get_steering_force(&self, safe_margin: f32, boid: &Boid) -> Vec3 {
+    fn get_steering_force(&self, safe_margin: f32, boid: &Boid) -> Vec3 {
         let to_boid = boid.position - self.center;
         let distance_to_center = to_boid.length();
         let edge_distance = self.radius - distance_to_center;
@@ -37,7 +40,7 @@ impl Sphere {
         (desired - boid.current_velocity).clamp_length_max(boid.boid_conf.max_force)
     }
 
-    pub fn is_inside(&self, position: Vec3) -> bool {
+    fn is_inside(&self, position: Vec3) -> bool {
         if position.distance(self.center) > self.radius {
             return false;
         } else {
@@ -45,7 +48,7 @@ impl Sphere {
         }
     }
 
-    pub fn draw(&self) {
+    fn draw(&self) {
         draw_sphere_wires(self.center, self.radius, None, DARKBLUE);
     }
 }
@@ -54,8 +57,11 @@ impl Cube {
     pub fn new(origin: Vec3, size: f32) -> Self {
         Cube { origin, size }
     }
+}
 
-    pub fn get_steering_force(&self, safe_margin: f32, boid: &Boid) -> Vec3 {
+impl Boundary for Cube {
+
+    fn get_steering_force(&self, safe_margin: f32, boid: &Boid) -> Vec3 {
         // calculating distance to all planes of the cube and checking if they're in the margin
         let boid_pos = boid.position.to_array();
         let origin_pos = self.origin.to_array();
@@ -84,7 +90,7 @@ impl Cube {
         (desired - boid.current_velocity).clamp_length_max(boid.boid_conf.max_force)
     }
 
-    pub fn is_inside(&self, position: Vec3) -> bool {
+    fn is_inside(&self, position: Vec3) -> bool {
         for (p, o) in position
             .to_array()
             .iter()
@@ -98,7 +104,7 @@ impl Cube {
         return true;
     }
 
-    pub fn draw(&self) {
+    fn draw(&self) {
         draw_cube_wires(
             self.origin + self.size / 2.,
             vec3(self.size, self.size, self.size),
